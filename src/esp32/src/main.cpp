@@ -1,19 +1,43 @@
 #include <Arduino.h>
+#include <WiFi.h>
+#include "secrets.h"
 
-// put function declarations here:
 
 
+float tempReading (); 
 void setup() {
-  // put your setup code here, to run once:
- Serial.begin(115200);
+  // Öppna kanalen till serial monitor.
+  Serial.begin(115200);
+
+  // Börja ansluta till Wi-Fi, en gång.
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+  // Vänta tills anslutningen är klar.
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.print(".");
+    delay(500);
+  }
+
+  // När vi kommer hit är ESP32:n ansluten.
+  Serial.printf("\nESP32 ansluten till Wi-Fi!\n");
+  Serial.print("IP-adress: ");
+  Serial.println(WiFi.localIP());
 }
 
 void loop() {
-  // put your main code here, to run repeatedly:
-  Serial.println("hey from esp32");  //motsvarar printf("text\n"); 
+ 
 
-  delay(1000);  // Väntar i 1000 millisekunder, alltså en sekund. det motsvarar sleep()  	
-}  
+  float temp = tempReading(); 
+   
+  Serial.printf("{\"sensorId\": \"room-a-temp-01\", \"value\": %.1f, \"unit\": \"C\"}\n", temp);
+  
+  delay(5000); 
+}
 
-// put function definitions here:
 
+float tempReading (){
+  float randomNumber = random(180, 260) / 10.0;
+  return randomNumber;
+  // random(180, 260) ger ett heltal mellan 180 och 259.
+  // Delat med 10.0 blir det ett decimaltal mellan 18.0 och 25.9.
+}
