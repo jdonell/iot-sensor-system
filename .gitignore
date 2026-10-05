@@ -1,1 +1,3 @@
 src/broker/passwd
+src/server/credentials.py
+__pycache__/
