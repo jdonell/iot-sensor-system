@@ -1,55 +1,52 @@
 # Arkitektur
 
-## Diagram
+Den här filen beskriver hur systemet är uppbyggt och hur delarna pratar med varandra.
+
+## Översikt
+
+(Skriv här med egna ord: vad mäter systemet, vart skickas värdet, och vem kan läsa det till slut?)
+
+## Hur delarna hänger ihop
+
+Systemet har fyra delar. Ett mätvärde går genom dem i den här ordningen:
+
+1. ESP32-kortet läser ett värde från en potentiometer och gör om det till en temperatur.
+2. ESP32-kortet skickar värdet till brokern med MQTT.
+3. Brokern skickar värdet vidare till Python-tjänsten, också med MQTT.
+4. Python-tjänsten sparar värdet. Andra program kan sedan fråga efter det via API:et, med HTTP.
+
+Kort sagt:
 
 ```
-┌──────────────────┐
-│ ESP32-C6         │
-│ + potentiometer  │
-└────────┬─────────┘
-         │ MQTT, port 1883, JSON
-         │ topic: byggnad/rum-a/temp
-         ▼
-┌──────────────────┐
-│ Mosquitto-broker │
-│ (inloggning)     │
-└────────┬─────────┘
-         │ MQTT, port 1883
-         ▼
-┌──────────────────┐
-│ Python-tjänst    │
-│ (app.py)         │
-└────────┬─────────┘
-         │ HTTP/REST, port 5000, JSON
-         ▼
-┌──────────────────┐
-│ Klient (curl,    │
-│ webbläsare, app) │
-└──────────────────┘
+ESP32  ->  Broker  ->  Python-tjänst  ->  API
 ```
 
-## Komponenter och ansvar
+## Vad varje del gör
 
-| Komponent | Ansvar | Plats i repot |
-|---|---|---|
-| ESP32-C6 | Läser mätvärdet, bygger JSON och publicerar till brokern var 5:e sekund | `src/esp32/` |
-| Mosquitto-broker | Tar emot meddelanden och skickar dem vidare till prenumeranter | `src/broker/` |
-| Python-tjänst | Prenumererar, validerar JSON, sparar senaste värdet, loggar och tillhandahåller API:et | `src/server/` |
-| Klient | Hämtar data via API:et | – |
+- ESP32-kortet: läser mätvärdet, gör om det till JSON och skickar det till brokern var femte sekund. Koden finns i mappen src/esp32.
+- Brokern (Mosquitto): tar emot meddelanden och skickar dem vidare till alla som har bett om dem. Inställningarna finns i mappen src/broker.
+- Python-tjänsten: tar emot meddelandena, kontrollerar att de är rätt ifyllda, sparar det senaste värdet och skriver vad som händer i en logg. Koden finns i mappen src/server.
+- API:et: är en del av Python-tjänsten. Andra program kan fråga det efter det senaste mätvärdet.
 
-## Nätverk
+## Adresser och portar
 
-| Vad | Värde |
-|---|---|
-| Brokerns adress (från ESP32) | `192.168.0.127` (datorns IP i hemnätverket) |
-| Brokerns adress (från Python-tjänsten) | `localhost` |
-| MQTT-port | `1883` |
-| API-port | `5000` |
-| Topic | `byggnad/rum-a/temp` |
+- ESP32-kortet når brokern på datorns IP-adress, 192.168.0.127.
+- Python-tjänsten når brokern på localhost, eftersom de körs på samma dator.
+- MQTT använder port 1883.
+- API:et använder port 5000.
+- Mätvärdena skickas på topicen byggnad/rum-a/temp.
 
-## Datakontrakt
+## Hur delarna pratar med varandra
 
-Varje mätvärde skickas som JSON:
+(Skriv här med egna ord: förklara publish och subscribe. Vem skickar, vem tar emot, och vad gör brokern i mitten?)
+
+## Varför MQTT
+
+(Skriv här med egna ord: varför passar MQTT för att skicka mätvärden från en liten ESP32? Jämför gärna med HTTP.)
+
+## Hur ett meddelande ser ut
+
+Varje mätvärde skickas som JSON. Ett meddelande ser ut så här:
 
 ```json
 {
@@ -60,17 +57,24 @@ Varje mätvärde skickas som JSON:
 }
 ```
 
-| Fält | Typ | Beskrivning |
-|---|---|---|
-| `sensorId` | text | Sensorns unika namn |
-| `timestamp` | text | Tidpunkt för mätningen (ISO 8601), hämtad via NTP |
-| `value` | tal | Uppmätt temperatur |
-| `unit` | text | Enhet, `C` för Celsius |
+Det här betyder fälten:
 
-Python-tjänsten kräver fälten `sensorId`, `value` och `unit`, och att `value` är ett tal mellan -40 och 85.
+- sensorId är sensorns namn, så att man vet vilken sensor värdet kommer från.
+- timestamp är tiden då mätningen gjordes. ESP32-kortet hämtar tiden från internet.
+- value är temperaturen.
+- unit är enheten. C betyder Celsius.
 
-## Återanslutning och kommunikationsfel
+Python-tjänsten kräver att sensorId, value och unit finns med. Den kräver också att value är ett tal mellan -40 och 85. Annars sparas inte meddelandet.
 
-- **ESP32:** om Wi-Fi tappas försöker kortet ansluta igen. Om brokern inte svarar görs ett nytt försök var 5:e sekund.
-- **Python-tjänsten:** återansluter automatiskt till brokern med 1–30 sekunders väntetid mellan försöken, och prenumererar igen i `on_connect`.
-- **Ogiltiga meddelanden** fångas med `try`/`except` och räknas som valideringsfel, utan att tjänsten kraschar.
+## Om något går fel med anslutningen
+
+- Om ESP32-kortet tappar Wi-Fi försöker det ansluta igen.
+- Om ESP32-kortet inte når brokern försöker det igen var femte sekund.
+- Om Python-tjänsten tappar brokern försöker den ansluta igen av sig själv. När den har anslutit ber den om meddelandena på nytt.
+- Om ett meddelande är trasigt kraschar inte Python-tjänsten. Den skriver felet i loggen och hoppar över meddelandet.
+
+## Begränsningar och förbättringar
+
+- Just nu skickas alla meddelanden som vanlig text över nätverket, även lösenorden. Någon som tjuvlyssnar på nätverket kan läsa dem. Med kryptering, som heter TLS, blir texten oläslig för alla utom mottagaren.
+
+- Både ESP32:n och Python-tjänsten loggar in med användarnamnet esp32 och samma lösenord. Om lösenordet läcker kan någon låtsas vara vilken del av systemet som helst. Bättre vore att varje del har sitt eget.
